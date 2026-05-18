@@ -16,6 +16,10 @@ export default function NotificationsScreen({ navigation }) {
     if (type === "PROFILE_REJECTED") return "close-circle";
     if (type === "PROFILE_SUBMITTED") return "time";
     if (type === "PROFILE_APPROVAL_PENDING") return "hourglass";
+    if (type === "SERVICE_BOOKING_APPROVED") return "checkmark-circle";
+    if (type === "SERVICE_BOOKING_CONFIRMED") return "checkmark-circle";
+    if (type === "SERVICE_BOOKING_REJECTED") return "close-circle";
+    if (type === "SERVICE_REQUEST_SENT") return "briefcase";
     return "notifications";
   };
 
@@ -23,6 +27,10 @@ export default function NotificationsScreen({ navigation }) {
     if (type === "PROFILE_APPROVED") return COLORS.success || "#16A34A";
     if (type === "PROFILE_REJECTED") return COLORS.danger || "#DC2626";
     if (type === "PROFILE_SUBMITTED") return COLORS.warning || "#F59E0B";
+    if (type === "SERVICE_BOOKING_APPROVED") return COLORS.success || "#16A34A";
+    if (type === "SERVICE_BOOKING_CONFIRMED") return COLORS.success || "#16A34A";
+    if (type === "SERVICE_BOOKING_REJECTED") return COLORS.danger || "#DC2626";
+    if (type === "SERVICE_REQUEST_SENT") return COLORS.warning || "#F59E0B";
     return COLORS.primary;
   };
 
@@ -30,7 +38,7 @@ export default function NotificationsScreen({ navigation }) {
     <SafeAreaView style={styles.container}>
       <Header
         title="Notifications"
-        subtitle="Admin approval updates"
+        subtitle="Admin approval and service booking updates"
         navigation={navigation}
         showBack={true}
         showNotification={false}

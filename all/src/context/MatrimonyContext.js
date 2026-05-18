@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useMemo, useState } from "react";
-import { Asset } from "expo-asset";
+import { API_ENDPOINTS } from "../config/api";
 
 const MatrimonyContext = createContext(null);
 
-const img = (imageFile) => Asset.fromModule(imageFile).uri;
+const img = (imageFile) => imageFile;
 
 /*
   IMPORTANT:
@@ -817,6 +817,7 @@ export function MatrimonyProvider({ children }) {
   const [verificationRequests, setVerificationRequests] = useState([]);
   const [approvalRequests, setApprovalRequests] = useState([]);
   const [serviceRequests, setServiceRequests] = useState([]);
+  const [serviceCustomer, setServiceCustomer] = useState(null);
 
   const [notifications, setNotifications] = useState([
     {
@@ -880,13 +881,19 @@ export function MatrimonyProvider({ children }) {
   const getUserNotifications = (userId) => {
     const activeUserId = userId || getCurrentUserId();
 
-    return notifications.filter(
-      (item) =>
-        item.to === "user" ||
-        item.to === activeUserId ||
-        item.userId === activeUserId ||
-        !item.to
-    );
+    return notifications.filter((item) => {
+      if (item.to === "admin") return false;
+      if (item.to === activeUserId || item.userId === activeUserId) {
+        return true;
+      }
+
+      return (
+        item.to === "user" &&
+        (!item.userId ||
+          item.userId === "current-user" ||
+          item.userId === activeUserId)
+      );
+    });
   };
 
   const getAdminNotifications = () =>
@@ -1145,60 +1152,425 @@ export function MatrimonyProvider({ children }) {
     setWishlist((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const sendServiceRequest = (service) => {
+  const readApiJson = async (response) => {
+    const text = await response.text();
+
+    if (!text) return {};
+
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      return { message: text };
+    }
+  };
+
+  const getApiMessage = (data, fallback) =>
+    data?.message || data?.error || data?.title || fallback;
+
+  const normalizeServiceRequestStatus = (status = "Pending") => {
+    const normalized = String(status || "Pending").trim().toUpperCase();
+
+    if (normalized === "APPROVED") return "Approved";
+    if (normalized === "REJECTED") return "Rejected";
+    return "Pending";
+  };
+
+  const formatDateTime = (value) => {
+    if (!value) return "Now";
+
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "Now" : date.toLocaleString();
+  };
+
+  const getServiceDecisionMessage = (request, status = request?.status) => {
+    const serviceTitle = request?.serviceTitle || "Wedding Service";
+
+    if (status === "Approved") {
+      return `Your ${serviceTitle} booking request is approved. Vendor will contact you soon.`;
+    }
+
+    if (status === "Rejected") {
+      return `Your ${serviceTitle} booking request is rejected. Please contact support for details.`;
+    }
+
+    return "";
+  };
+
+  const parseBookingDate = (value) => {
+    if (!value) return null;
+
+    const normalized = String(value).trim();
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(normalized)
+      ? new Date(`${normalized}T00:00:00`)
+      : new Date(normalized);
+
+    return Number.isNaN(date.getTime()) ? null : date;
+  };
+
+  const isServiceBookingDateActive = (request, referenceDate = new Date()) => {
+    const bookingDate = parseBookingDate(
+      request?.bookingEndDate || request?.bookingDate
+    );
+
+    if (!bookingDate) return true;
+
+    bookingDate.setHours(23, 59, 59, 999);
+    return bookingDate >= referenceDate;
+  };
+
+  const getServiceRequestSortValue = (request) => {
+    if (request?.requestedAt) {
+      const requestedAt = new Date(request.requestedAt).getTime();
+      if (!Number.isNaN(requestedAt)) return requestedAt;
+    }
+
+    const localTimestamp = String(request?.id || "").match(/_(\d{10,})_/);
+    if (localTimestamp) return Number(localTimestamp[1]);
+
+    const numericId = Number(request?.backendId || "");
+    return Number.isNaN(numericId) ? 0 : numericId;
+  };
+
+  const mapBackendServiceRequest = (item) => ({
+    id: item?.id ? `SERVICE_REQ_${item.id}` : createId("SERVICE_REQ"),
+    backendId: item?.id || null,
+    serviceId: item?.serviceId || "",
+    serviceTitle: item?.serviceTitle || "Wedding Service",
+    category: item?.category || "",
+    location: item?.location || "",
+    price: item?.price || "",
+    bookingDate: item?.bookingDate || "",
+    bookingEndDate: item?.bookingEndDate || "",
+    bookingTime: item?.bookingTime || "",
+    userId: item?.customer?.userKey || "current-user",
+    userName: item?.customer?.fullName || "User",
+    phone: item?.customer?.phone || "",
+    email: item?.customer?.email || "",
+    status: normalizeServiceRequestStatus(item?.status),
+    requestedAt: item?.requestedAt || "",
+    submittedAt: formatDateTime(item?.requestedAt),
+    approvedAt:
+      normalizeServiceRequestStatus(item?.status) === "Approved"
+        ? formatDateTime(item?.statusUpdatedAt)
+        : "",
+    rejectedAt:
+      normalizeServiceRequestStatus(item?.status) === "Rejected"
+        ? formatDateTime(item?.statusUpdatedAt)
+        : "",
+    statusUpdatedAt: item?.statusUpdatedAt || "",
+    adminMessage:
+      item?.adminMessage ||
+      getServiceDecisionMessage(item, normalizeServiceRequestStatus(item?.status)),
+    directConfirmed:
+      normalizeServiceRequestStatus(item?.status) === "Approved" &&
+      Boolean(item?.adminMessage),
+    service: services.find((service) => service.id === item?.serviceId) || null,
+  });
+
+  const mergeServiceRequests = (nextRequests = []) => {
+    setServiceRequests((prev) => {
+      const merged = [...prev];
+
+      nextRequests.forEach((nextRequest) => {
+        const existingIndex = merged.findIndex(
+          (item) => item.id === nextRequest.id
+        );
+
+        if (existingIndex >= 0) {
+          const existingRequest = merged[existingIndex];
+          const statusChanged = existingRequest.status !== nextRequest.status;
+
+          merged[existingIndex] = {
+            ...existingRequest,
+            ...nextRequest,
+            adminMessage: statusChanged
+              ? nextRequest.adminMessage
+              : existingRequest.adminMessage || nextRequest.adminMessage,
+          };
+          return;
+        }
+
+        merged.push(nextRequest);
+      });
+
+      return merged;
+    });
+  };
+
+  const loadServiceRequests = async () => {
+    try {
+      const response = await fetch(API_ENDPOINTS.SERVICE_REQUEST_STATUS);
+      const data = await readApiJson(response);
+
+      if (!response.ok) {
+        return {
+          success: false,
+          message: getApiMessage(data, "Unable to load service requests."),
+        };
+      }
+
+      const requests = Array.isArray(data)
+        ? data.map(mapBackendServiceRequest)
+        : [];
+
+      mergeServiceRequests(requests);
+
+      return {
+        success: true,
+        requests,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: "Backend connect avvadam ledu. Local requests matrame chupistunnam.",
+      };
+    }
+  };
+
+  const hasApprovedServiceBooking = (userId = getCurrentUserId()) =>
+    serviceRequests.some(
+      (item) =>
+        item.userId === userId &&
+        item.status === "Approved" &&
+        isServiceBookingDateActive(item)
+    );
+
+  const createLocalServiceRequest = (service, options = {}) => {
     const userId = getCurrentUserId();
+    const status = options.status || "Pending";
+    const directConfirmed = Boolean(options.directConfirmed);
+    const serviceTitle = service?.title || "Wedding Service";
+    const decisionMessage =
+      options.adminMessage ||
+      getServiceDecisionMessage({ serviceTitle }, status);
 
     const request = {
-      id: createId("SERVICE_REQ"),
+      id: options.requestId || createId("SERVICE_REQ"),
       serviceId: service?.id || "",
-      serviceTitle: service?.title || "Wedding Service",
+      serviceTitle,
       category: service?.category || "",
       location: service?.location || "",
       price: service?.price || "",
+      bookingDate: options.bookingDate || "",
+      bookingEndDate: options.bookingEndDate || "",
+      bookingTime: options.bookingTime || "",
       userId,
-      userName: myProfile?.name || "User",
-      phone: myProfile?.phone || "",
-      email: myProfile?.email || "",
-      status: "Pending",
+      userName:
+        options.customer?.fullName || serviceCustomer?.fullName || myProfile?.name || "User",
+      phone: options.customer?.phone || serviceCustomer?.phone || myProfile?.phone || "",
+      email: options.customer?.email || serviceCustomer?.email || myProfile?.email || "",
+      status,
       submittedAt: "Now",
-      approvedAt: "",
-      rejectedAt: "",
-      adminMessage: "",
+      approvedAt: status === "Approved" ? "Now" : "",
+      rejectedAt: status === "Rejected" ? "Now" : "",
+      adminMessage:
+        status === "Approved" && directConfirmed && !options.adminMessage
+          ? "Booking confirmed directly because admin already approved your previous service booking."
+          : decisionMessage,
+      directConfirmed,
       service,
     };
 
     setServiceRequests((prev) => [request, ...prev]);
 
     addNotification(
-      "Service Request Sent",
-      `Mee request ${request.serviceTitle} service ki send ayindi.`,
+      directConfirmed ? "Booking Confirmed" : "Service Request Sent",
+      directConfirmed
+        ? `Mee ${request.serviceTitle} booking confirm ayindi. Vendor will contact you soon.`
+        : `Mee request ${request.serviceTitle} service ki send ayindi.`,
       {
         to: "user",
         userId,
-        type: "SERVICE_REQUEST_SENT",
+        type: directConfirmed
+          ? "SERVICE_BOOKING_CONFIRMED"
+          : "SERVICE_REQUEST_SENT",
         requestId: request.id,
       }
     );
 
-    addNotification(
-      "New Wedding Service Booking",
-      `${request.userName} ${request.serviceTitle} service book cheyyadaniki request pampaaru.`,
-      {
-        to: "admin",
-        userId: "admin",
-        type: "SERVICE_BOOKING_REQUEST",
-        requestId: request.id,
-      }
-    );
+    if (!options.skipAdminNotification) {
+      addNotification(
+        "New Wedding Service Booking",
+        `${request.userName} ${request.serviceTitle} service book cheyyadaniki request pampaaru.`,
+        {
+          to: "admin",
+          userId: "admin",
+          type: "SERVICE_BOOKING_REQUEST",
+          requestId: request.id,
+        }
+      );
+    }
 
     return {
       success: true,
-      message: "Wedding service request sent to admin.",
+      directConfirmed,
+      message: directConfirmed
+        ? "Booking confirmed successfully."
+        : "Wedding service request sent to admin.",
       request,
     };
   };
 
-  const updateServiceRequestStatus = (
+  const checkServiceCustomerStatus = async () => {
+    const userKey = getCurrentUserId();
+    const response = await fetch(
+      `${API_ENDPOINTS.CUSTOMER_STATUS}?userKey=${encodeURIComponent(userKey)}`
+    );
+    const data = await readApiJson(response);
+
+    if (!response.ok) {
+      throw new Error(
+        getApiMessage(data, "Unable to check registration status.")
+      );
+    }
+
+    if (data?.registered) {
+      setServiceCustomer(data);
+    }
+
+    return data;
+  };
+
+  const registerServiceCustomer = async (formData) => {
+    const userKey = getCurrentUserId();
+    const response = await fetch(API_ENDPOINTS.CUSTOMER_REGISTER, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        userKey,
+        fullName: String(formData?.fullName || "").trim(),
+        phone: String(formData?.phone || "").trim(),
+        email: String(formData?.email || "").trim(),
+        address: String(formData?.address || "").trim(),
+        city: String(formData?.city || "").trim(),
+      }),
+    });
+    const data = await readApiJson(response);
+
+    if (!response.ok) {
+      return {
+        success: false,
+        message: getApiMessage(data, "Unable to register service customer."),
+      };
+    }
+
+    if (data?.registered) {
+      setServiceCustomer(data);
+      return {
+        success: true,
+        customer: data,
+        message: getApiMessage(data, "Registration completed successfully."),
+      };
+    }
+
+    return {
+      success: false,
+      message: getApiMessage(data, "Registration failed."),
+    };
+  };
+
+  const sendServiceRequest = async (service, bookingDetails = {}) => {
+    try {
+      const userKey = getCurrentUserId();
+
+      const status = serviceCustomer?.registered
+        ? serviceCustomer
+        : await checkServiceCustomerStatus();
+
+      if (!status?.registered) {
+        return {
+          success: false,
+          registrationRequired: true,
+          message: "Please complete one-time registration before booking.",
+        };
+      }
+
+      const response = await fetch(API_ENDPOINTS.SERVICE_REQUEST_SEND, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userKey,
+          serviceId: service?.id || "",
+          title: service?.title || "Wedding Service",
+          category: service?.category || "",
+          location: service?.location || "",
+          price: service?.price || "",
+          bookingDate: bookingDetails?.bookingDate || "",
+          bookingEndDate: bookingDetails?.bookingEndDate || "",
+          bookingTime: bookingDetails?.bookingTime || "",
+        }),
+      });
+      const data = await readApiJson(response);
+
+      if (!response.ok) {
+        return {
+          success: false,
+          message: getApiMessage(data, "Unable to send service request."),
+        };
+      }
+
+      if (!data?.registered) {
+        return {
+          success: false,
+          registrationRequired: true,
+          message: getApiMessage(
+            data,
+            "Registration required before sending service request."
+          ),
+        };
+      }
+
+      if (!data?.requestCreated) {
+        return {
+          success: false,
+          message: getApiMessage(data, "Service request was not created."),
+        };
+      }
+
+      return createLocalServiceRequest(service, {
+        requestId: data?.requestId ? `SERVICE_REQ_${data.requestId}` : undefined,
+        customer: status,
+        status: normalizeServiceRequestStatus(data?.status),
+        directConfirmed: Boolean(data?.directConfirmed),
+        skipAdminNotification: Boolean(data?.directConfirmed),
+        adminMessage: data?.directConfirmed
+          ? getApiMessage(
+              data,
+              `Your ${service?.title || "Wedding Service"} booking is confirmed. Vendor will contact you soon.`
+            )
+          : "",
+        bookingDate: bookingDetails?.bookingDate || "",
+        bookingEndDate: bookingDetails?.bookingEndDate || "",
+        bookingTime: bookingDetails?.bookingTime || "",
+      });
+    } catch (error) {
+      return {
+        success: false,
+        message:
+          "Backend connect avvadam ledu. Server run lo unda? API_BASE_URL correct aa check cheyyandi.",
+      };
+    }
+  };
+
+  const registerServiceCustomerAndSendRequest = async (
+    formData,
+    service,
+    bookingDetails = {}
+  ) => {
+    const registerResult = await registerServiceCustomer(formData);
+
+    if (!registerResult.success) {
+      return registerResult;
+    }
+
+    return sendServiceRequest(service, bookingDetails);
+  };
+
+  const updateServiceRequestStatus = async (
     requestId,
     status,
     adminMessage = ""
@@ -1226,9 +1598,40 @@ export function MatrimonyProvider({ children }) {
       adminMessage: finalMessage,
     };
 
+    const backendRequestId = String(requestId).replace("SERVICE_REQ_", "");
+
+    if (/^\d+$/.test(backendRequestId)) {
+      try {
+        const query = new URLSearchParams({
+          status,
+          adminMessage: finalMessage,
+        });
+
+        await fetch(
+          `${API_ENDPOINTS.SERVICE_REQUEST_STATUS}/${backendRequestId}/status?${query.toString()}`,
+          {
+            method: "PATCH",
+          }
+        );
+      } catch (error) {
+        // Local state still updates so the demo flow is not blocked by network issues.
+      }
+    }
+
     setServiceRequests((prev) =>
       prev.map((item) => (item.id === requestId ? updatedRequest : item))
     );
+
+    if (status === "Approved") {
+      setServiceCustomer((prev) =>
+        prev
+          ? {
+              ...prev,
+              approved: true,
+            }
+          : prev
+      );
+    }
 
     addNotification(`Service Booking ${status}`, finalMessage, {
       to: "user",
@@ -1255,6 +1658,22 @@ export function MatrimonyProvider({ children }) {
 
   const getRejectedServiceRequests = () =>
     serviceRequests.filter((item) => item.status === "Rejected");
+
+  const getLatestServiceBookingDecision = (
+    userId = getCurrentUserId(),
+    referenceDate = new Date()
+  ) =>
+    serviceRequests
+      .filter(
+        (item) =>
+          item.userId === userId &&
+          (item.status === "Approved" || item.status === "Rejected") &&
+          isServiceBookingDateActive(item, referenceDate)
+      )
+      .sort(
+        (first, second) =>
+          getServiceRequestSortValue(second) - getServiceRequestSortValue(first)
+      )[0] || null;
 
   const saveMyProfile = (profileData) => {
     const requiredFields = [
@@ -1530,6 +1949,7 @@ export function MatrimonyProvider({ children }) {
       verificationRequests,
       approvalRequests,
       serviceRequests,
+      serviceCustomer,
 
       addNotification,
       getUserNotifications,
@@ -1540,10 +1960,16 @@ export function MatrimonyProvider({ children }) {
       removeFromWishlist,
 
       sendServiceRequest,
+      registerServiceCustomer,
+      registerServiceCustomerAndSendRequest,
+      checkServiceCustomerStatus,
+      hasApprovedServiceBooking,
+      loadServiceRequests,
       updateServiceRequestStatus,
       getPendingServiceRequests,
       getApprovedServiceRequests,
       getRejectedServiceRequests,
+      getLatestServiceBookingDecision,
 
       saveMyProfile,
 
@@ -1581,6 +2007,7 @@ export function MatrimonyProvider({ children }) {
       verificationRequests,
       approvalRequests,
       serviceRequests,
+      serviceCustomer,
     ]
   );
 

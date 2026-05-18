@@ -19,6 +19,7 @@ import Header from "../components/Header";
 import PrimaryButton from "../components/PrimaryButton";
 import { COLORS } from "../constants/colors";
 import { useMatrimony } from "../context/MatrimonyContext";
+import { getImageSource } from "../utils/imageSource";
 
 const genderOptions = ["Bride", "Groom"];
 const maritalOptions = ["Never Married", "Divorced", "Widowed"];
@@ -53,7 +54,10 @@ export default function ProfileCreateEditScreen({ navigation }) {
     partnerCommunity: myProfile?.partnerCommunity || "",
     partnerLocation: myProfile?.partnerLocation || "",
     partnerEducation: myProfile?.partnerEducation || "",
-    image: myProfile?.image || DEFAULT_PROFILE_IMAGE,
+    image:
+      typeof myProfile?.image === "string"
+        ? myProfile.image
+        : DEFAULT_PROFILE_IMAGE,
   });
 
   const updateField = (key, value) => {
@@ -201,7 +205,7 @@ export default function ProfileCreateEditScreen({ navigation }) {
           {/* PROFILE PHOTO CARD */}
           <View style={styles.photoCard}>
             <View style={styles.imageBox}>
-              <Image source={{ uri: form.image }} style={styles.avatar} />
+              <Image source={getImageSource(form.image)} style={styles.avatar} />
 
               {/* Only this camera symbol opens real camera */}
               <TouchableOpacity
@@ -461,7 +465,7 @@ export default function ProfileCreateEditScreen({ navigation }) {
           <FormInput
             label="Profile Image URL"
             placeholder="https://image-url.com/photo.jpg"
-            value={form.image}
+            value={String(form.image || "")}
             onChangeText={(text) => updateField("image", text)}
           />
 

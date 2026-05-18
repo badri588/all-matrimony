@@ -14,6 +14,7 @@ import { LinearGradient } from "expo-linear-gradient";
 
 import { COLORS } from "../../constants/colors";
 import { useMatrimony } from "../../context/MatrimonyContext";
+import { getImageSource } from "../../utils/imageSource";
 
 export default function AdminApprovalsScreen({ route }) {
   const selectedRequestId = route?.params?.requestId || null;
@@ -122,7 +123,7 @@ export default function AdminApprovalsScreen({ route }) {
                 )}
 
                 <View style={styles.profileRow}>
-                  <Image source={{ uri: request.image }} style={styles.avatar} />
+                  <Image source={getImageSource(request.image)} style={styles.avatar} />
 
                   <View style={{ flex: 1 }}>
                     <Text style={styles.name}>{request.profileName}</Text>

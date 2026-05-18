@@ -2,11 +2,12 @@ import React from "react";
 import { View, Text, Image, StyleSheet, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "../constants/colors";
+import { getImageSource } from "../utils/imageSource";
 
 export default function ProfileCard({ item, onPress, onWishlist }) {
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.9}>
-      <Image source={{ uri: item.image }} style={styles.image} />
+      <Image source={getImageSource(item.image)} style={styles.image} />
 
       <View style={styles.info}>
         <View style={styles.topRow}>

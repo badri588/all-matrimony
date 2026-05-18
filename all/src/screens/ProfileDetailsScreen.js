@@ -14,6 +14,7 @@ import { COLORS } from "../constants/colors";
 import Header from "../components/Header";
 import PrimaryButton from "../components/PrimaryButton";
 import { useMatrimony } from "../context/MatrimonyContext";
+import { getImageSource } from "../utils/imageSource";
 
 export default function ProfileDetailsScreen({ navigation, route }) {
   const profile = route?.params?.profile;
@@ -94,7 +95,7 @@ export default function ProfileDetailsScreen({ navigation, route }) {
       />
 
       <ScrollView contentContainerStyle={styles.content}>
-        <Image source={{ uri: profile.image }} style={styles.image} />
+        <Image source={getImageSource(profile.image)} style={styles.image} />
 
         <View style={styles.card}>
           <View style={styles.nameRow}>

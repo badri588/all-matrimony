@@ -13,6 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import Header from "../components/Header";
 import { COLORS } from "../constants/colors";
 import { useMatrimony } from "../context/MatrimonyContext";
+import { getImageSource } from "../utils/imageSource";
 
 export default function InterestRequestsScreen({ navigation }) {
   const { interests, updateInterestStatus } = useMatrimony();
@@ -41,7 +42,7 @@ export default function InterestRequestsScreen({ navigation }) {
         ) : (
           interests.map((item) => (
             <View key={item.id} style={styles.card}>
-              <Image source={{ uri: item.profile.image }} style={styles.avatar} />
+              <Image source={getImageSource(item.profile.image)} style={styles.avatar} />
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.name}>{item.profile.name}</Text>

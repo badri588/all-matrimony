@@ -3,12 +3,17 @@ import { Text, TouchableOpacity, StyleSheet } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { COLORS } from "../constants/colors";
 
-export default function PrimaryButton({ title, onPress, style }) {
+export default function PrimaryButton({ title, onPress, style, disabled }) {
   return (
-    <TouchableOpacity activeOpacity={0.85} onPress={onPress} style={style}>
+    <TouchableOpacity
+      activeOpacity={0.85}
+      onPress={onPress}
+      style={style}
+      disabled={disabled}
+    >
       <LinearGradient
         colors={[COLORS.primary, COLORS.primaryDark]}
-        style={styles.button}
+        style={[styles.button, disabled && styles.disabledButton]}
       >
         <Text style={styles.text}>{title}</Text>
       </LinearGradient>
@@ -23,6 +28,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     elevation: 3,
+  },
+  disabledButton: {
+    opacity: 0.65,
   },
   text: {
     color: COLORS.white,
