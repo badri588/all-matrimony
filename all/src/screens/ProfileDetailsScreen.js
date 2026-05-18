@@ -67,8 +67,8 @@ export default function ProfileDetailsScreen({ navigation, route }) {
     Alert.alert("Shortlisted", `${profile.name} added to wishlist.`);
   };
 
-  const handleSendInterest = () => {
-    const result = sendInterest(profile);
+  const handleSendInterest = async () => {
+    const result = await sendInterest(profile);
     Alert.alert(result.success ? "Success" : "Already Sent", result.message);
   };
 

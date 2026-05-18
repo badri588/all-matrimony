@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import {
   ScrollView,
   View,
@@ -17,6 +17,18 @@ export default function AdminNotificationsScreen({ navigation }) {
   const { getAdminNotifications, markNotificationRead } = useMatrimony();
 
   const adminNotifications = getAdminNotifications ? getAdminNotifications() : [];
+
+  useEffect(() => {
+    const unreadNotifications = adminNotifications.filter((item) => !item.read);
+
+    if (unreadNotifications.length === 0 || typeof markNotificationRead !== "function") {
+      return;
+    }
+
+    unreadNotifications.forEach((item) => {
+      markNotificationRead(item.id);
+    });
+  }, [adminNotifications, markNotificationRead]);
 
   const handleNotificationPress = (item) => {
     if (markNotificationRead) {

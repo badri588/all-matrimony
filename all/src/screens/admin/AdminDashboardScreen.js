@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import {
   ScrollView,
   View,
@@ -17,10 +17,18 @@ export default function AdminDashboardScreen({ navigation }) {
   const {
     profiles,
     services,
+    allUsers = [],
     verificationRequests = [],
     approvalRequests = [],
     getAdminNotifications,
+    loadAdminData,
   } = useMatrimony();
+
+  useEffect(() => {
+    if (typeof loadAdminData === "function") {
+      loadAdminData();
+    }
+  }, []);
 
   const adminNotifications = getAdminNotifications ? getAdminNotifications() : [];
 
@@ -162,7 +170,7 @@ export default function AdminDashboardScreen({ navigation }) {
           <StatCard
             icon="people"
             label="Profiles"
-            value={profiles.length}
+            value={allUsers.length || profiles.length}
             color={COLORS.primary}
           />
 

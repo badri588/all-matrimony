@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useEffect } from "react";
 import {
   Alert,
+  Linking,
   ScrollView,
   View,
   Text,
@@ -19,7 +20,13 @@ import { getImageSource } from "../../utils/imageSource";
 export default function AdminVerificationScreen({ route }) {
   const selectedRequestId = route?.params?.requestId || null;
 
-  const { verificationRequests = [], updateVerificationStatus } = useMatrimony();
+  const { verificationRequests = [], updateVerificationStatus, loadAdminData } = useMatrimony();
+
+  useEffect(() => {
+    if (typeof loadAdminData === "function") {
+      loadAdminData();
+    }
+  }, []);
 
   const sortedRequests = selectedRequestId
     ? [...verificationRequests].sort((a, b) => {
@@ -41,8 +48,8 @@ export default function AdminVerificationScreen({ route }) {
     (item) => item.status === "Rejected"
   ).length;
 
-  const handleApprove = (request) => {
-    const result = updateVerificationStatus(
+  const handleApprove = async (request) => {
+    const result = await updateVerificationStatus(
       request.id,
       "Approved",
       "Congratulations! Mee background verification admin approve chesaru."
@@ -56,8 +63,8 @@ export default function AdminVerificationScreen({ route }) {
     }
   };
 
-  const handleReject = (request) => {
-    const result = updateVerificationStatus(
+  const handleReject = async (request) => {
+    const result = await updateVerificationStatus(
       request.id,
       "Rejected",
       "Mee background verification admin reject chesaru. Please details correct chesi malli submit cheyyandi."
@@ -81,6 +88,18 @@ export default function AdminVerificationScreen({ route }) {
     if (status === "Approved") return "#DCFCE7";
     if (status === "Rejected") return "#FEE2E2";
     return "#FFF7DD";
+  };
+
+  const openProof = async (proofUrl) => {
+    if (!proofUrl) {
+      return;
+    }
+
+    try {
+      await Linking.openURL(proofUrl);
+    } catch (error) {
+      Alert.alert("Open Failed", "Unable to open this uploaded proof right now.");
+    }
   };
 
   return (
@@ -227,10 +246,35 @@ export default function AdminVerificationScreen({ route }) {
                     label="Aadhaar"
                     value={request.aadhaarNumber || request.aadhaar || "N/A"}
                   />
+                  <InfoRow icon="home" label="Family Contact" value={request.familyContact || "N/A"} />
                   <InfoRow
-                    icon="home"
-                    label="Address"
-                    value={request.address || "N/A"}
+                    icon="person"
+                    label="Character"
+                    value={request.characterVerification || "N/A"}
+                  />
+                </View>
+
+                <View style={styles.proofSection}>
+                  <Text style={styles.proofTitle}>Uploaded Proofs</Text>
+                  <ProofRow
+                    label="Address Proof"
+                    value={request.address}
+                    onOpen={openProof}
+                  />
+                  <ProofRow
+                    label="Education Proof"
+                    value={request.educationProof}
+                    onOpen={openProof}
+                  />
+                  <ProofRow
+                    label="Job / Income Proof"
+                    value={request.jobProof}
+                    onOpen={openProof}
+                  />
+                  <ProofRow
+                    label="Marital Status Proof"
+                    value={request.maritalProof}
+                    onOpen={openProof}
                   />
                 </View>
 
@@ -321,6 +365,36 @@ function InfoRow({ icon, label, value }) {
       <Ionicons name={`${icon}-outline`} size={17} color={COLORS.primary} />
       <Text style={styles.infoLabel}>{label}:</Text>
       <Text style={styles.infoValue}>{value || "N/A"}</Text>
+    </View>
+  );
+}
+
+function ProofRow({ label, value, onOpen }) {
+  const isFileLink =
+    typeof value === "string" &&
+    (value.startsWith("http://") || value.startsWith("https://"));
+
+  const fileName = isFileLink ? value.split("/").pop()?.split("?")[0] : "";
+
+  return (
+    <View style={styles.proofRow}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.proofLabel}>{label}</Text>
+        <Text style={styles.proofValue}>
+          {isFileLink ? fileName || "Uploaded file" : value || "Not uploaded"}
+        </Text>
+      </View>
+
+      {isFileLink ? (
+        <TouchableOpacity
+          style={styles.viewProofBtn}
+          activeOpacity={0.85}
+          onPress={() => onOpen(value)}
+        >
+          <Ionicons name="open-outline" size={16} color={COLORS.white} />
+          <Text style={styles.viewProofText}>View</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -530,6 +604,58 @@ const styles = StyleSheet.create({
     marginTop: 12,
     borderWidth: 1,
     borderColor: COLORS.border,
+  },
+
+  proofSection: {
+    backgroundColor: COLORS.white,
+    borderRadius: 18,
+    padding: 12,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+
+  proofTitle: {
+    color: COLORS.text,
+    fontWeight: "900",
+    marginBottom: 10,
+  },
+
+  proofRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+
+  proofLabel: {
+    color: COLORS.text,
+    fontWeight: "900",
+    marginBottom: 2,
+  },
+
+  proofValue: {
+    color: COLORS.muted,
+    fontWeight: "700",
+  },
+
+  viewProofBtn: {
+    minWidth: 82,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: COLORS.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 10,
+  },
+
+  viewProofText: {
+    color: COLORS.white,
+    fontWeight: "900",
   },
 
   messageLabel: {

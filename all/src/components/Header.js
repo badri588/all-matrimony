@@ -1,9 +1,10 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Platform, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { COLORS } from "../constants/colors";
+import { useMatrimony } from "../context/MatrimonyContext";
 
 export default function Header({
   title,
@@ -15,9 +16,14 @@ export default function Header({
 }) {
   const fallbackNavigation = useNavigation();
   const route = useRoute();
+  const { myProfile, getUnreadUserNotificationCount } = useMatrimony();
 
   const nav = navigation || fallbackNavigation;
   const currentRouteName = route?.name;
+  const unreadNotificationCount =
+    typeof getUnreadUserNotificationCount === "function"
+      ? getUnreadUserNotificationCount()
+      : 0;
 
   const handleBack = () => {
     if (nav?.canGoBack && nav.canGoBack()) {
@@ -80,7 +86,11 @@ export default function Header({
           </TouchableOpacity>
         ) : (
           <View style={styles.logoCircle}>
-            <Ionicons name="heart" size={22} color={COLORS.maroon} />
+            {myProfile?.image ? (
+              <Image source={{ uri: myProfile.image }} style={styles.profileImage} />
+            ) : (
+              <Ionicons name="heart" size={22} color={COLORS.maroon} />
+            )}
           </View>
         )}
 
@@ -107,7 +117,13 @@ export default function Header({
               size={22}
               color={COLORS.white}
             />
-            <View style={styles.badge} />
+            {unreadNotificationCount > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>
+                  {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
         ) : (
           <View style={styles.rightSpace} />
@@ -156,6 +172,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.45)",
+    overflow: "hidden",
+  },
+  profileImage: {
+    width: "100%",
+    height: "100%",
   },
 
   iconBtn: {
@@ -189,13 +210,22 @@ const styles = StyleSheet.create({
 
   badge: {
     position: "absolute",
-    top: 9,
-    right: 9,
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: COLORS.gold,
+    top: -2,
+    right: -2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: COLORS.danger || "#DC2626",
     borderWidth: 1,
     borderColor: COLORS.white,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+  },
+
+  badgeText: {
+    color: COLORS.white,
+    fontSize: 10,
+    fontWeight: "900",
   },
 });

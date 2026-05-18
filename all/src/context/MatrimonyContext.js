@@ -801,6 +801,7 @@ const defaultMyProfile = {
   partnerCommunity: "",
   partnerLocation: "",
   partnerEducation: "",
+  habits: "",
   image: PROFILE_IMAGES.defaultProfile,
   photos: [PROFILE_IMAGES.defaultProfile],
   profileCompletion: 25,
@@ -808,63 +809,256 @@ const defaultMyProfile = {
   verificationStatus: "Not Submitted",
 };
 
+const normalizeImage = (value, fallback = PROFILE_IMAGES.defaultProfile) =>
+  toApiAssetUrl(value || fallback);
+
+const normalizeProofAsset = (value) => {
+  if (!value || typeof value !== "string") {
+    return value || "";
+  }
+
+  if (
+    value.startsWith("/uploads/") ||
+    value.startsWith("http://") ||
+    value.startsWith("https://")
+  ) {
+    return toApiAssetUrl(value);
+  }
+
+  return value;
+};
+
 export function MatrimonyProvider({ children }) {
   const [profiles, setProfiles] = useState(demoProfiles);
+  const [allUsers, setAllUsers] = useState([]);
   const [services, setServices] = useState(demoServices);
   const [wishlist, setWishlist] = useState([]);
   const [myProfile, setMyProfile] = useState(defaultMyProfile);
+  const [currentUser, setCurrentUser] = useState(null);
   const [interests, setInterests] = useState([]);
   const [verificationRequests, setVerificationRequests] = useState([]);
   const [approvalRequests, setApprovalRequests] = useState([]);
   const [serviceRequests, setServiceRequests] = useState([]);
   const [serviceCustomer, setServiceCustomer] = useState(null);
 
-  const [notifications, setNotifications] = useState([
-    {
-      id: "n1",
-      to: "user",
-      userId: "current-user",
-      type: "GENERAL",
-      title: "New Match Found",
-      message: "Anjali profile matches your preferences.",
-      time: "Today",
-      read: false,
-      createdAt: new Date().toISOString(),
+  const fetchJson = async (url, options = {}) => {
+    const requestHeaders = {
+      ...(options.headers || {}),
+    };
+
+    if (options.body != null && !requestHeaders["Content-Type"]) {
+      requestHeaders["Content-Type"] = "application/json";
+    }
+
+    const response = await fetch(url, {
+      headers: requestHeaders,
+      ...options,
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || data.success === false) {
+      throw new Error(data.message || "Request failed.");
+    }
+
+    return data;
+  };
+
+  const mapUserToProfile = (user = {}) => ({
+    ...defaultMyProfile,
+    ...user,
+    image: normalizeImage(user?.image, defaultMyProfile.image),
+    photos: [normalizeImage(user?.image, defaultMyProfile.image)],
+    profileCompletion:
+      typeof user?.profileCompletion === "number"
+        ? user.profileCompletion
+        : defaultMyProfile.profileCompletion,
+    approvalStatus: user?.approvalStatus || defaultMyProfile.approvalStatus,
+    verificationStatus:
+      user?.verificationStatus || defaultMyProfile.verificationStatus,
+    habits: user?.habits || "",
+  });
+
+  const mapApprovalRequest = (request = {}) => ({
+    ...request,
+    image: normalizeImage(request?.image),
+  });
+
+  const mapVerificationRequest = (request = {}) => ({
+    ...request,
+    image: normalizeImage(request?.image),
+    address: normalizeProofAsset(request?.address),
+    educationProof: normalizeProofAsset(request?.educationProof),
+    jobProof: normalizeProofAsset(request?.jobProof),
+    maritalProof: normalizeProofAsset(request?.maritalProof),
+  });
+
+  const mapInterestRequest = (request = {}) => ({
+    ...request,
+    profile: {
+      ...(request?.profile || {}),
+      image: normalizeImage(request?.profile?.image),
     },
-    {
-      id: "n2",
-      to: "user",
-      userId: "current-user",
-      type: "GENERAL",
-      title: "Wedding Service Offer",
-      message:
-        "Function hall, arkestra and bride/groom car services are available.",
-      time: "Yesterday",
-      read: false,
-      createdAt: new Date().toISOString(),
-    },
-  ]);
+  });
+
+  const hydrateUserSession = async (userData) => {
+    if (!userData?.id) {
+      return;
+    }
+
+    setCurrentUser(userData);
+    setMyProfile(mapUserToProfile(userData));
+    await Promise.all([
+      loadApprovedProfiles(),
+      loadCurrentUserData(userData.id),
+      loadAdminData(),
+    ]);
+  };
+
+  const loadApprovedProfiles = async () => {
+    try {
+      const data = await fetchJson(`${API_BASE_URL}/api/users/approved-profiles`);
+      setProfiles(
+        Array.isArray(data.data) && data.data.length > 0
+          ? data.data.map((item) => ({
+              ...item,
+              image: normalizeImage(item?.image),
+              photos: [normalizeImage(item?.image)],
+            }))
+          : demoProfiles
+      );
+    } catch (error) {
+      setProfiles(demoProfiles);
+    }
+  };
+
+  const loadAllUsers = async () => {
+    try {
+      const data = await fetchJson(`${API_BASE_URL}/api/admin/users`);
+      setAllUsers(
+        Array.isArray(data.data)
+          ? data.data.map((item) => ({
+              ...item,
+              image: normalizeImage(item?.image),
+            }))
+          : []
+      );
+    } catch (error) {
+      setAllUsers([]);
+    }
+  };
+
+  const loadCurrentUserData = async (userId = currentUser?.id) => {
+    if (!userId) return;
+
+    try {
+      const [profileData, notificationData, verificationData] = await Promise.allSettled([
+        fetchJson(`${API_BASE_URL}/api/users/${userId}/profile`),
+        fetchJson(`${API_BASE_URL}/api/users/${userId}/notifications`),
+        fetchJson(`${API_BASE_URL}/api/users/${userId}/verification-requests`),
+      ]);
+      const interestData = await fetchJson(`${API_BASE_URL}/api/users/${userId}/interests`).catch(
+        () => null
+      );
+
+      if (profileData.status === "fulfilled" && profileData.value?.data) {
+        setMyProfile(mapUserToProfile(profileData.value.data));
+        setCurrentUser(profileData.value.data);
+      }
+
+      if (notificationData.status === "fulfilled") {
+        setNotifications(
+          Array.isArray(notificationData.value?.data) ? notificationData.value.data : []
+        );
+      }
+
+      if (verificationData.status === "fulfilled") {
+        setVerificationRequests(
+          Array.isArray(verificationData.value?.data)
+            ? verificationData.value.data.map(mapVerificationRequest)
+            : []
+        );
+      }
+
+      if (interestData?.data) {
+        setInterests(
+          Array.isArray(interestData.data)
+            ? interestData.data.map(mapInterestRequest)
+            : []
+        );
+      }
+    } catch (error) {
+      // keep local state as fallback
+    }
+  };
+
+  const loadAdminData = async () => {
+    try {
+      const [
+        approvalData,
+        verificationData,
+        adminNotificationData,
+        allUsersData,
+      ] = await Promise.allSettled([
+        fetchJson(`${API_BASE_URL}/api/admin/approval-requests`),
+        fetchJson(`${API_BASE_URL}/api/admin/verification-requests`),
+        fetchJson(`${API_BASE_URL}/api/admin/notifications`),
+        fetchJson(`${API_BASE_URL}/api/admin/users`),
+      ]);
+
+      if (approvalData.status === "fulfilled") {
+        setApprovalRequests(
+          Array.isArray(approvalData.value?.data)
+            ? approvalData.value.data.map(mapApprovalRequest)
+            : []
+        );
+      }
+
+      if (verificationData.status === "fulfilled") {
+        setVerificationRequests(
+          Array.isArray(verificationData.value?.data)
+            ? verificationData.value.data.map(mapVerificationRequest)
+            : []
+        );
+      }
+
+      if (adminNotificationData.status === "fulfilled") {
+        const adminNotifications = Array.isArray(adminNotificationData.value?.data)
+          ? adminNotificationData.value.data
+          : [];
+
+        setNotifications((prev) => {
+          const userNotifications = prev.filter((item) => item.to !== "admin");
+          return [...adminNotifications, ...userNotifications];
+        });
+      }
+
+      if (allUsersData.status === "fulfilled") {
+        setAllUsers(
+          Array.isArray(allUsersData.value?.data)
+            ? allUsersData.value.data.map((item) => ({
+                ...item,
+                image: normalizeImage(item?.image),
+              }))
+            : []
+        );
+      }
+    } catch (error) {
+      // no-op
+    }
+  };
 
   const createId = (prefix = "ID") =>
     `${prefix}_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
 
-  const getCurrentUserId = (profileData = myProfile) => {
-    const email = String(profileData?.email || "").trim().toLowerCase();
-    const phone = String(
-      profileData?.phone || profileData?.contactNumber || ""
-    ).trim();
-
-    if (email) return email;
-    if (phone) return phone;
-
-    return "current-user";
-  };
+  const getCurrentUserId = () =>
+    currentUser?.id || myProfile?.id || "current-user";
 
   const addNotification = (title, message, options = {}) => {
     const newNotification = {
       id: createId("NOTI"),
       to: options.to || "user",
-      userId: options.userId || "current-user",
+      userId: options.userId || getCurrentUserId(),
       type: options.type || "GENERAL",
       requestId: options.requestId || null,
       title,
@@ -878,8 +1072,9 @@ export function MatrimonyProvider({ children }) {
     return newNotification;
   };
 
-  const getUserNotifications = (userId) => {
-    const activeUserId = userId || getCurrentUserId();
+  useEffect(() => {
+    loadApprovedProfiles();
+  }, []);
 
     return notifications.filter((item) => {
       if (item.to === "admin") return false;
@@ -899,234 +1094,87 @@ export function MatrimonyProvider({ children }) {
   const getAdminNotifications = () =>
     notifications.filter((item) => item.to === "admin");
 
-  const markNotificationRead = (notificationId) => {
+  const getUnreadUserNotificationCount = () =>
+    getUserNotifications().filter((item) => !item.read).length;
+
+  const getUnreadAdminNotificationCount = () =>
+    getAdminNotifications().filter((item) => !item.read).length;
+
+  const markNotificationRead = async (notificationId) => {
+    try {
+      await fetchJson(
+        `${API_BASE_URL}/api/users/notifications/${notificationId}/read`,
+        { method: "POST" }
+      );
+    } catch (error) {
+      // fallback to local update
+    }
+
     setNotifications((prev) =>
       prev.map((item) =>
-        item.id === notificationId ? { ...item, read: true } : item
+        String(item.id) === String(notificationId) ? { ...item, read: true } : item
       )
     );
   };
 
-  const submitProfileForApproval = (profileData = myProfile) => {
-    const userId = getCurrentUserId(profileData);
-
-    const alreadyPending = approvalRequests.find(
-      (item) => item.userId === userId && item.status === "Pending"
-    );
-
-    if (alreadyPending) {
-      addNotification(
-        "Approval Already Pending",
-        "Mee profile already admin approval kosam pending lo undi.",
-        {
-          to: "user",
-          userId,
-          type: "PROFILE_APPROVAL_PENDING",
-          requestId: alreadyPending.id,
-        }
-      );
-
-      return {
-        success: false,
-        message: "Profile already pending for admin approval.",
-        request: alreadyPending,
-      };
-    }
-
-    const request = {
-      id: createId("APPROVAL"),
-      profileId: profileData?.id || createId("PROFILE"),
-      userId,
-      profileName:
-        profileData?.name || profileData?.fullName || "My Matrimony Profile",
-      gender: profileData?.gender || "Groom",
-      age: profileData?.age || "",
-      phone: profileData?.phone || profileData?.contactNumber || "",
-      email: profileData?.email || "",
-      community: profileData?.community || "",
-      religion: profileData?.religion || "",
-      caste: profileData?.caste || "",
-      location: profileData?.location || "",
-      education: profileData?.education || "",
-      job: profileData?.job || "",
-      income: profileData?.income || "",
-      height: profileData?.height || "",
-      image: profileData?.image || defaultMyProfile.image,
-      photos: profileData?.photos || defaultMyProfile.photos,
-      status: "Pending",
-      submittedAt: "Now",
-      approvedAt: "",
-      rejectedAt: "",
-      adminMessage: "",
-      profileData,
-    };
-
-    setApprovalRequests((prev) => [request, ...prev]);
-
-    addNotification(
-      "New Profile Approval Request",
-      `${request.profileName} profile approval kosam submit chesaru.`,
-      {
-        to: "admin",
-        userId: "admin",
-        type: "PROFILE_APPROVAL_REQUEST",
-        requestId: request.id,
-      }
-    );
-
-    addNotification(
-      "Profile Sent to Admin",
-      "Mee profile admin approval kosam send ayindi. Admin approve chesthe notification vastundi.",
-      {
-        to: "user",
-        userId,
-        type: "PROFILE_SUBMITTED",
-        requestId: request.id,
-      }
-    );
-
-    return {
-      success: true,
-      message: "Profile sent to admin approval.",
-      request,
-    };
+  const submitProfileForApproval = async (profileData = myProfile) => {
+    return saveMyProfile(profileData);
   };
 
-  const approveProfile = (
+  const approveProfile = async (
     requestId,
     adminMessage = "Congratulations! Mee profile admin approve chesaru."
   ) => {
-    const request = approvalRequests.find((item) => item.id === requestId);
+    try {
+      const data = await fetchJson(
+        `${API_BASE_URL}/api/admin/approval-requests/${requestId}/approve`,
+        {
+          method: "POST",
+          body: JSON.stringify({ adminMessage }),
+        }
+      );
 
-    if (!request) {
+      await Promise.all([loadApprovedProfiles(), loadAdminData(), loadCurrentUserData()]);
+
+      return {
+        success: true,
+        message: data.message,
+        request: data.data,
+      };
+    } catch (error) {
       return {
         success: false,
-        message: "Approval request not found.",
+        message: error.message,
       };
     }
-
-    const updatedRequest = {
-      ...request,
-      status: "Approved",
-      approvedAt: "Now",
-      rejectedAt: "",
-      adminMessage,
-    };
-
-    setApprovalRequests((prev) =>
-      prev.map((item) => (item.id === requestId ? updatedRequest : item))
-    );
-
-    const approvedProfile = {
-      ...request.profileData,
-      id: request.profileId,
-      name: request.profileName,
-      gender: request.gender,
-      age: request.age,
-      phone: request.phone,
-      email: request.email,
-      community: request.community,
-      religion: request.religion,
-      caste: request.caste,
-      location: request.location,
-      education: request.education,
-      job: request.job,
-      income: request.income,
-      height: request.height,
-      image: request.image,
-      photos: request.photos || [request.image],
-      approvalStatus: "Approved",
-    };
-
-    setProfiles((prev) => {
-      const exists = prev.find((item) => item.id === approvedProfile.id);
-
-      if (exists) {
-        return prev.map((item) =>
-          item.id === approvedProfile.id ? approvedProfile : item
-        );
-      }
-
-      return [approvedProfile, ...prev];
-    });
-
-    setMyProfile((prev) => {
-      const currentUserId = getCurrentUserId(prev);
-
-      if (currentUserId === request.userId) {
-        return {
-          ...prev,
-          approvalStatus: "Approved",
-        };
-      }
-
-      return prev;
-    });
-
-    addNotification("Profile Approved", adminMessage, {
-      to: "user",
-      userId: request.userId,
-      type: "PROFILE_APPROVED",
-      requestId,
-    });
-
-    return {
-      success: true,
-      message: "Profile approved successfully.",
-      request: updatedRequest,
-    };
   };
 
-  const rejectProfile = (
+  const rejectProfile = async (
     requestId,
-    reason = "Mee profile admin reject chesaru. Details correct chesi malli submit cheyyandi."
+    reason = "Mee profile admin reject chesaru. Please details correct chesi malli submit cheyyandi."
   ) => {
-    const request = approvalRequests.find((item) => item.id === requestId);
+    try {
+      const data = await fetchJson(
+        `${API_BASE_URL}/api/admin/approval-requests/${requestId}/reject`,
+        {
+          method: "POST",
+          body: JSON.stringify({ adminMessage: reason }),
+        }
+      );
 
-    if (!request) {
+      await Promise.all([loadAdminData(), loadCurrentUserData()]);
+
+      return {
+        success: true,
+        message: data.message,
+        request: data.data,
+      };
+    } catch (error) {
       return {
         success: false,
-        message: "Approval request not found.",
+        message: error.message,
       };
     }
-
-    const updatedRequest = {
-      ...request,
-      status: "Rejected",
-      approvedAt: "",
-      rejectedAt: "Now",
-      adminMessage: reason,
-    };
-
-    setApprovalRequests((prev) =>
-      prev.map((item) => (item.id === requestId ? updatedRequest : item))
-    );
-
-    setMyProfile((prev) => {
-      const currentUserId = getCurrentUserId(prev);
-
-      if (currentUserId === request.userId) {
-        return {
-          ...prev,
-          approvalStatus: "Rejected",
-        };
-      }
-
-      return prev;
-    });
-
-    addNotification("Profile Rejected", reason, {
-      to: "user",
-      userId: request.userId,
-      type: "PROFILE_REJECTED",
-      requestId,
-    });
-
-    return {
-      success: true,
-      message: "Profile rejected successfully.",
-      request: updatedRequest,
-    };
   };
 
   const getPendingApprovalRequests = () =>
@@ -1699,234 +1747,272 @@ export function MatrimonyProvider({ children }) {
     const updatedProfile = {
       ...myProfile,
       ...profileData,
+      image: toStoredAssetPath(profileData?.image || myProfile?.image),
       profileCompletion: completion,
       approvalStatus: "Pending",
     };
 
-    setMyProfile(updatedProfile);
-
-    addNotification(
-      "Profile Updated",
-      `Your profile is now ${completion}% complete.`
-    );
-
-    const approvalResult = submitProfileForApproval(updatedProfile);
-
-    return {
-      success: true,
-      profile: updatedProfile,
-      approvalResult,
-    };
-  };
-
-  const sendInterest = (profile) => {
-    const existing = interests.find((item) => item.profile.id === profile.id);
-
-    if (existing) {
+    if (!currentUser?.id) {
+      setMyProfile(updatedProfile);
       return {
         success: false,
-        message: `Interest already ${existing.status}.`,
+        message: "Please login again before saving profile.",
       };
     }
 
-    const newInterest = {
-      id: createId("INTEREST"),
-      profile,
-      status: "Pending",
-      createdAt: "Now",
-    };
-
-    setInterests((prev) => [newInterest, ...prev]);
-
-    addNotification(
-      "Interest Sent",
-      `Your interest request sent to ${profile.name}.`
-    );
-
-    return {
-      success: true,
-      message: `Interest sent to ${profile.name}.`,
-    };
-  };
-
-  const updateInterestStatus = (interestId, status) => {
-    let selectedProfileName = "";
-
-    setInterests((prev) =>
-      prev.map((item) => {
-        if (item.id === interestId) {
-          selectedProfileName = item.profile.name;
-          return {
-            ...item,
-            status,
-          };
-        }
-
-        return item;
-      })
-    );
-
-    addNotification(
-      `Interest ${status}`,
-      `${selectedProfileName || "Profile"} interest marked as ${status}.`
-    );
-
-    return {
-      success: true,
-      message: `Interest ${status}.`,
-    };
-  };
-
-  const getInterestStatus = (profileId) => {
-    const item = interests.find((interest) => interest.profile.id === profileId);
-    return item?.status || null;
-  };
-
-  const submitVerificationRequest = (data = {}) => {
-    const userId = getCurrentUserId(myProfile);
-
-    const alreadyPending = verificationRequests.find(
-      (item) => item.userId === userId && item.status === "Pending"
-    );
-
-    if (alreadyPending) {
-      addNotification(
-        "Verification Already Pending",
-        "Mee background verification request already admin approval kosam pending lo undi.",
+    try {
+      const data = await fetchJson(
+        `${API_BASE_URL}/api/users/${currentUser.id}/profile`,
         {
-          to: "user",
-          userId,
-          type: "VERIFICATION_PENDING",
-          requestId: alreadyPending.id,
+          method: "PUT",
+          body: JSON.stringify(updatedProfile),
         }
       );
 
+      await Promise.all([loadCurrentUserData(currentUser.id), loadAdminData()]);
+
+      return {
+        success: true,
+        profile: data?.data?.profile
+          ? mapUserToProfile(data.data.profile)
+          : updatedProfile,
+        approvalResult: data?.data?.approvalRequest
+          ? mapApprovalRequest(data.data.approvalRequest)
+          : null,
+        message: data.message,
+      };
+    } catch (error) {
       return {
         success: false,
-        message: "Your verification request is already pending.",
-        request: alreadyPending,
+        message: error.message,
+      };
+    }
+  };
+
+  const sendInterest = async (profile) => {
+    if (!currentUser?.id || !profile?.id) {
+      return {
+        success: false,
+        message: "Please login again before sending interest.",
       };
     }
 
-    const newRequest = {
-      id: createId("VERIFY"),
-      userId,
-      profileName: myProfile?.name || "My Profile",
-      gender: myProfile?.gender || "Groom",
-      age: myProfile?.age || "",
-      phone: myProfile?.phone || "",
-      email: myProfile?.email || "",
-      community: myProfile?.community || "",
-      religion: myProfile?.religion || "",
-      caste: myProfile?.caste || "",
-      location: myProfile?.location || "",
-      education: myProfile?.education || "",
-      job: myProfile?.job || "",
-      image: myProfile?.image || defaultMyProfile.image,
-      status: "Pending",
-      submittedAt: "Now",
-      approvedAt: "",
-      rejectedAt: "",
-      adminMessage: "",
-      ...data,
-    };
+    try {
+      const response = await fetchJson(
+        `${API_BASE_URL}/api/users/${currentUser.id}/interests`,
+        {
+          method: "POST",
+          body: JSON.stringify({ targetUserId: profile.id }),
+        }
+      );
 
-    setVerificationRequests((prev) => [newRequest, ...prev]);
+      await loadCurrentUserData(currentUser.id);
 
-    setMyProfile((prev) => ({
-      ...prev,
-      verificationStatus: "Pending",
-    }));
-
-    addNotification(
-      "Verification Submitted",
-      "Mee background verification request admin ki send ayindi. Admin approve/reject chesthe notification vastundi.",
-      {
-        to: "user",
-        userId,
-        type: "VERIFICATION_SUBMITTED",
-        requestId: newRequest.id,
-      }
-    );
-
-    addNotification(
-      "New Background Verification Request",
-      `${newRequest.profileName} background verification kosam request pampaaru.`,
-      {
-        to: "admin",
-        userId: "admin",
-        type: "VERIFICATION_REQUEST",
-        requestId: newRequest.id,
-      }
-    );
-
-    return {
-      success: true,
-      message: "Verification request sent to admin.",
-      request: newRequest,
-    };
+      return {
+        success: true,
+        message: response.message,
+        request: response.data ? mapInterestRequest(response.data) : null,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
   };
 
-  const updateVerificationStatus = (
+  const updateInterestStatus = async (interestId, status) => {
+    if (!currentUser?.id) {
+      return {
+        success: false,
+        message: "Please login again before updating interest.",
+      };
+    }
+
+    try {
+      const response = await fetchJson(
+        `${API_BASE_URL}/api/users/interests/${interestId}/status`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            actingUserId: currentUser.id,
+            status,
+          }),
+        }
+      );
+
+      await loadCurrentUserData(currentUser.id);
+
+      return {
+        success: true,
+        message: response.message,
+        request: response.data ? mapInterestRequest(response.data) : null,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  };
+
+  const getInterestStatus = (profileId) => {
+    const item = interests.find(
+      (interest) => String(interest?.profile?.id) === String(profileId)
+    );
+    return item?.status || null;
+  };
+
+  const getConversation = async (otherUserId) => {
+    if (!currentUser?.id || !otherUserId) {
+      return {
+        success: false,
+        message: "Conversation users are required.",
+      };
+    }
+
+    try {
+      const response = await fetchJson(
+        `${API_BASE_URL}/api/users/${currentUser.id}/chat/${otherUserId}`
+      );
+
+      return {
+        success: true,
+        messages: Array.isArray(response.data) ? response.data : [],
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+        messages: [],
+      };
+    }
+  };
+
+  const getPresence = async (otherUserId) => {
+    if (!otherUserId) {
+      return {
+        success: false,
+        message: "User is required.",
+      };
+    }
+
+    try {
+      const response = await fetchJson(`${API_BASE_URL}/api/users/presence/${otherUserId}`);
+      return {
+        success: true,
+        data: response.data,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  };
+
+  const sendChatMessage = async (receiverUserId, text) => {
+    if (!currentUser?.id) {
+      return {
+        success: false,
+        message: "Please login again before sending message.",
+      };
+    }
+
+    try {
+      const response = await fetchJson(`${API_BASE_URL}/api/users/chat/messages`, {
+        method: "POST",
+        body: JSON.stringify({
+          senderUserId: currentUser.id,
+          receiverUserId,
+          text,
+        }),
+      });
+
+      return {
+        success: true,
+        message: response.message,
+        data: response.data,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  };
+
+  const submitVerificationRequest = async (data = {}) => {
+    if (!currentUser?.id) {
+      return {
+        success: false,
+        message: "Please login again before submitting verification.",
+      };
+    }
+
+    try {
+      const payload = {
+        idNumber: data.idNumber,
+        addressProof: data.addressProof,
+        educationProof: data.educationProof,
+        jobProof: data.jobProof,
+        familyContact: data.familyContact,
+        characterVerification: data.characterVerification,
+        maritalProof: data.maritalProof,
+      };
+
+      const response = await fetchJson(
+        `${API_BASE_URL}/api/users/${currentUser.id}/verification-requests`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        }
+      );
+
+      await Promise.all([loadCurrentUserData(currentUser.id), loadAdminData()]);
+
+      return {
+        success: true,
+        message: response.message,
+        request: response.data,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  };
+
+  const updateVerificationStatus = async (
     requestId,
     status,
     adminMessage = ""
   ) => {
-    const request = verificationRequests.find((item) => item.id === requestId);
+    try {
+      const endpoint =
+        status === "Approved"
+          ? `${API_BASE_URL}/api/admin/verification-requests/${requestId}/approve`
+          : `${API_BASE_URL}/api/admin/verification-requests/${requestId}/reject`;
 
-    if (!request) {
+      const response = await fetchJson(endpoint, {
+        method: "POST",
+        body: JSON.stringify({ adminMessage }),
+      });
+
+      await Promise.all([loadCurrentUserData(), loadAdminData()]);
+
+      return {
+        success: true,
+        message: response.message,
+        request: response.data,
+      };
+    } catch (error) {
       return {
         success: false,
-        message: "Verification request not found.",
+        message: error.message,
       };
     }
-
-    const finalMessage =
-      adminMessage ||
-      (status === "Approved"
-        ? "Congratulations! Mee background verification admin approve chesaru."
-        : "Mee background verification admin reject chesaru. Details correct chesi malli submit cheyyandi.");
-
-    const updatedRequest = {
-      ...request,
-      status,
-      approvedAt: status === "Approved" ? "Now" : "",
-      rejectedAt: status === "Rejected" ? "Now" : "",
-      adminMessage: finalMessage,
-    };
-
-    setVerificationRequests((prev) =>
-      prev.map((item) => (item.id === requestId ? updatedRequest : item))
-    );
-
-    setMyProfile((prev) => {
-      const currentUserId = getCurrentUserId(prev);
-
-      if (currentUserId === request.userId) {
-        return {
-          ...prev,
-          verificationStatus: status,
-        };
-      }
-
-      return prev;
-    });
-
-    addNotification(`Background Verification ${status}`, finalMessage, {
-      to: "user",
-      userId: request.userId || "current-user",
-      type:
-        status === "Approved"
-          ? "VERIFICATION_APPROVED"
-          : "VERIFICATION_REJECTED",
-      requestId,
-    });
-
-    return {
-      success: true,
-      message: `Verification ${status}.`,
-      request: updatedRequest,
-    };
   };
 
   const getPendingVerificationRequests = () =>
@@ -1945,6 +2031,8 @@ export function MatrimonyProvider({ children }) {
       wishlist,
       notifications,
       myProfile,
+      currentUser,
+      allUsers,
       interests,
       verificationRequests,
       approvalRequests,
@@ -1954,7 +2042,12 @@ export function MatrimonyProvider({ children }) {
       addNotification,
       getUserNotifications,
       getAdminNotifications,
+      getUnreadUserNotificationCount,
+      getUnreadAdminNotificationCount,
       markNotificationRead,
+      hydrateUserSession,
+      loadCurrentUserData,
+      loadAdminData,
 
       addToWishlist,
       removeFromWishlist,
@@ -1983,6 +2076,9 @@ export function MatrimonyProvider({ children }) {
       sendInterest,
       updateInterestStatus,
       getInterestStatus,
+      getConversation,
+      getPresence,
+      sendChatMessage,
 
       submitVerificationRequest,
       updateVerificationStatus,
@@ -1991,6 +2087,7 @@ export function MatrimonyProvider({ children }) {
       getRejectedVerificationRequests,
 
       setProfiles,
+      setAllUsers,
       setServices,
       setNotifications,
       setApprovalRequests,
@@ -2003,6 +2100,8 @@ export function MatrimonyProvider({ children }) {
       wishlist,
       notifications,
       myProfile,
+      currentUser,
+      allUsers,
       interests,
       verificationRequests,
       approvalRequests,
@@ -2016,7 +2115,7 @@ export function MatrimonyProvider({ children }) {
       {children}
     </MatrimonyContext.Provider>
   );
-}
+
 
 export function useMatrimony() {
   const context = useContext(MatrimonyContext);

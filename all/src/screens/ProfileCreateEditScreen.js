@@ -16,7 +16,9 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 
 import Header from "../components/Header";
+import InlineMessage from "../components/InlineMessage";
 import PrimaryButton from "../components/PrimaryButton";
+import { API_BASE_URL, toApiAssetUrl } from "../config/api";
 import { COLORS } from "../constants/colors";
 import { useMatrimony } from "../context/MatrimonyContext";
 import { getImageSource } from "../utils/imageSource";
@@ -28,6 +30,10 @@ const DEFAULT_PROFILE_IMAGE = "https://randomuser.me/api/portraits/men/10.jpg";
 
 export default function ProfileCreateEditScreen({ navigation }) {
   const { myProfile, saveMyProfile } = useMatrimony();
+  const [submitMessage, setSubmitMessage] = useState("");
+  const [submitMessageType, setSubmitMessageType] = useState("info");
+  const [showSuccessOk, setShowSuccessOk] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   const [form, setForm] = useState({
     name: myProfile?.name || "",
@@ -61,10 +67,83 @@ export default function ProfileCreateEditScreen({ navigation }) {
   });
 
   const updateField = (key, value) => {
+    if (submitMessage) {
+      setSubmitMessage("");
+    }
+
+    if (showSuccessOk) {
+      setShowSuccessOk(false);
+    }
+
     setForm((prev) => ({
       ...prev,
       [key]: value,
     }));
+  };
+
+  const handleSuccessAcknowledge = () => {
+    setShowSuccessOk(false);
+
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    navigation.navigate("MainTabs");
+  };
+
+  const uploadProfileImage = async (asset) => {
+    if (!asset?.uri) {
+      return null;
+    }
+
+    setIsUploadingImage(true);
+    setSubmitMessageType("info");
+    setSubmitMessage("Uploading profile image...");
+    setShowSuccessOk(false);
+
+    try {
+      const formData = new FormData();
+      const fallbackName = `profile-${Date.now()}.jpg`;
+
+      if (Platform.OS === "web" && asset.file) {
+        formData.append("file", asset.file, asset.file.name || fallbackName);
+      } else {
+        formData.append("file", {
+          uri: asset.uri,
+          name: asset.fileName || fallbackName,
+          type: asset.mimeType || "image/jpeg",
+        });
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/uploads/profile-image`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await response.json();
+
+      const uploadedImagePath = data?.data?.imagePath || data?.data?.imageUrl;
+
+      if (!response.ok || data.success === false || !uploadedImagePath) {
+        throw new Error(data.message || "Image upload failed.");
+      }
+
+      updateField("image", toApiAssetUrl(uploadedImagePath));
+      setSubmitMessageType("success");
+      setSubmitMessage("Profile image uploaded successfully.");
+      return uploadedImagePath;
+    } catch (error) {
+      setSubmitMessageType("error");
+      setSubmitMessage(error.message || "Unable to upload image.");
+
+      if (Platform.OS !== "web") {
+        Alert.alert("Upload Failed", error.message || "Unable to upload image.");
+      }
+
+      return null;
+    } finally {
+      setIsUploadingImage(false);
+    }
   };
 
   // Camera symbol click chesthe real camera open avtundi
@@ -89,7 +168,7 @@ export default function ProfileCreateEditScreen({ navigation }) {
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        updateField("image", result.assets[0].uri);
+        await uploadProfileImage(result.assets[0]);
       }
     } catch (error) {
       Alert.alert("Camera Error", "Unable to open camera. Please try again.");
@@ -118,7 +197,7 @@ export default function ProfileCreateEditScreen({ navigation }) {
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        updateField("image", result.assets[0].uri);
+        await uploadProfileImage(result.assets[0]);
       }
     } catch (error) {
       Alert.alert("Image Error", "Unable to select image. Please try again.");
@@ -131,55 +210,84 @@ export default function ProfileCreateEditScreen({ navigation }) {
 
   const validate = () => {
     if (!form.name.trim()) {
-      Alert.alert("Required", "Please enter full name.");
+      setSubmitMessageType("error");
+      setSubmitMessage("Please enter full name.");
       return false;
     }
 
     if (!form.phone.trim()) {
-      Alert.alert("Required", "Please enter phone number.");
+      setSubmitMessageType("error");
+      setSubmitMessage("Please enter phone number.");
       return false;
     }
 
     if (!form.age.trim()) {
-      Alert.alert("Required", "Please enter age.");
+      setSubmitMessageType("error");
+      setSubmitMessage("Please enter age.");
       return false;
     }
 
     if (!form.community.trim()) {
-      Alert.alert("Required", "Please enter community.");
+      setSubmitMessageType("error");
+      setSubmitMessage("Please enter community.");
       return false;
     }
 
     if (!form.location.trim()) {
-      Alert.alert("Required", "Please enter location.");
+      setSubmitMessageType("error");
+      setSubmitMessage("Please enter location.");
       return false;
     }
 
     if (!form.about.trim()) {
-      Alert.alert("Required", "Please write about profile.");
+      setSubmitMessageType("error");
+      setSubmitMessage("Please write about profile.");
       return false;
     }
 
     return true;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!validate()) return;
 
-    saveMyProfile(form);
+    if (isUploadingImage) {
+      setSubmitMessageType("info");
+      setSubmitMessage("Please wait until the image upload finishes.");
+      return;
+    }
 
-    Alert.alert("Success", "Profile saved successfully.", [
-      {
-        text: "OK",
-        onPress: () => {
-          if (navigation.canGoBack()) {
-            navigation.goBack();
-          } else {
-            navigation.navigate("MainTabs");
-          }
+    setSubmitMessage("");
+    setShowSuccessOk(false);
+    const result = await saveMyProfile(form);
+
+    if (!result?.success) {
+      const message = result?.message || "Unable to save profile.";
+      setSubmitMessageType("error");
+      setSubmitMessage(message);
+
+      if (Platform.OS !== "web") {
+        Alert.alert("Save Failed", message);
+      }
+
+      return;
+    }
+
+    const successMessage =
+      "Profile submitted successfully. Waiting for admin approval.";
+
+    setSubmitMessageType("success");
+    setSubmitMessage(successMessage);
+    setShowSuccessOk(true);
+
+    if (Platform.OS !== "web") {
+      Alert.alert("Success", successMessage, [
+        {
+          text: "OK",
+          onPress: handleSuccessAcknowledge,
         },
-      },
-    ]);
+      ]);
+    }
   };
 
   return (
@@ -195,13 +303,17 @@ export default function ProfileCreateEditScreen({ navigation }) {
 
       <KeyboardAvoidingView
         style={styles.keyboardView}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
       >
         <ScrollView
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.content}
         >
+          <InlineMessage type={submitMessageType} text={submitMessage} />
+
           {/* PROFILE PHOTO CARD */}
           <View style={styles.photoCard}>
             <View style={styles.imageBox}>
@@ -469,6 +581,13 @@ export default function ProfileCreateEditScreen({ navigation }) {
             onChangeText={(text) => updateField("image", text)}
           />
 
+          <FormInput
+            label="Habits"
+            placeholder="Reading, travel, fitness, music"
+            value={form.habits}
+            onChangeText={(text) => updateField("habits", text)}
+          />
+
           <Text style={styles.sectionTitle}>Partner Preferences</Text>
 
           <FormInput
@@ -503,7 +622,16 @@ export default function ProfileCreateEditScreen({ navigation }) {
             title="Save Profile"
             onPress={handleSave}
             style={styles.saveBtn}
+            disabled={isUploadingImage}
           />
+
+          {Platform.OS === "web" && showSuccessOk ? (
+            <PrimaryButton
+              title="OK"
+              onPress={handleSuccessAcknowledge}
+              style={styles.okBtn}
+            />
+          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -545,7 +673,9 @@ const styles = StyleSheet.create({
 
   content: {
     padding: 16,
-    paddingBottom: 42,
+    paddingBottom: 160,
+    flexGrow: 1,
+    gap: 12,
   },
 
   photoCard: {
@@ -756,5 +886,9 @@ const styles = StyleSheet.create({
 
   saveBtn: {
     marginTop: 24,
+  },
+
+  okBtn: {
+    marginTop: 12,
   },
 });

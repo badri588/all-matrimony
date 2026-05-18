@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { SafeAreaView, ScrollView, View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -10,6 +10,18 @@ export default function NotificationsScreen({ navigation }) {
   const { getUserNotifications, markNotificationRead } = useMatrimony();
 
   const userNotifications = getUserNotifications ? getUserNotifications() : [];
+
+  useEffect(() => {
+    const unreadNotifications = userNotifications.filter((item) => !item.read);
+
+    if (unreadNotifications.length === 0 || typeof markNotificationRead !== "function") {
+      return;
+    }
+
+    unreadNotifications.forEach((item) => {
+      markNotificationRead(item.id);
+    });
+  }, [markNotificationRead, userNotifications]);
 
   const getIconName = (type) => {
     if (type === "PROFILE_APPROVED") return "checkmark-circle";
@@ -102,7 +114,9 @@ export default function NotificationsScreen({ navigation }) {
                   <TouchableOpacity
                     style={styles.markBtn}
                     activeOpacity={0.85}
-                    onPress={() => markNotificationRead(item.id)}
+                    onPress={async () => {
+                      await markNotificationRead(item.id);
+                    }}
                   >
                     <Text style={styles.markBtnText}>Mark as Read</Text>
                   </TouchableOpacity>

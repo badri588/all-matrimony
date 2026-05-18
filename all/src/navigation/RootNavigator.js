@@ -6,6 +6,7 @@ import RoleSelectionScreen from "../screens/RoleSelectionScreen";
 import LoginScreen from "../screens/LoginScreen";
 import RegisterScreen from "../screens/RegisterScreen";
 import AdminLoginScreen from "../screens/AdminLoginScreen";
+import ForgotPasswordScreen from "../screens/ForgotPasswordScreen";
 
 import MainTabNavigator from "./MainTabNavigator";
 import AdminTabNavigator from "./AdminTabNavigator";
@@ -42,6 +43,11 @@ export default function RootNavigator() {
       <Stack.Screen name="Login" component={LoginScreen} />
 
       <Stack.Screen name="Register" component={RegisterScreen} />
+
+      <Stack.Screen
+        name="ForgotPassword"
+        component={ForgotPasswordScreen}
+      />
 
       <Stack.Screen name="AdminLogin" component={AdminLoginScreen} />
 
