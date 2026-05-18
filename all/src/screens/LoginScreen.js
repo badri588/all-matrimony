@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import {
-  Alert,
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -14,26 +14,92 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 
-import { COLORS } from "../constants/colors";
+import InlineMessage from "../components/InlineMessage";
 import PrimaryButton from "../components/PrimaryButton";
+import { COLORS } from "../constants/colors";
+import { API_BASE_URL } from "../config/api";
+import { useMatrimony } from "../context/MatrimonyContext";
+import { validateIdentifier } from "../utils/authValidation";
 
 export default function LoginScreen({ navigation }) {
-  const [phone, setPhone] = useState("");
+  const { hydrateUserSession } = useMatrimony();
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState({ type: "info", text: "" });
 
-  const handleLogin = () => {
-    if (!phone.trim()) {
-      Alert.alert("Required", "Please enter phone number.");
+  const handleLogin = async () => {
+    const identifierResult = validateIdentifier(identifier);
+    const cleanPassword = password.trim();
+
+    if (!identifierResult.valid) {
+      setMessage({
+        type: "error",
+        text: identifierResult.message,
+      });
       return;
     }
 
-    if (!password.trim()) {
-      Alert.alert("Required", "Please enter password.");
+    if (!cleanPassword) {
+      setMessage({
+        type: "error",
+        text: "Please enter password.",
+      });
       return;
     }
 
-    navigation.replace("MainTabs");
+    try {
+      setLoading(true);
+      setMessage({ type: "info", text: "" });
+
+      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          identifier: identifierResult.normalizedValue,
+          password: cleanPassword,
+        }),
+      });
+
+      const rawResponse = await response.text();
+      let data = null;
+
+      try {
+        data = rawResponse ? JSON.parse(rawResponse) : null;
+      } catch (parseError) {
+        setMessage({
+          type: "error",
+          text: `Login API returned an invalid response from ${API_BASE_URL}.`,
+        });
+        return;
+      }
+
+      if (!response.ok || !data?.success) {
+        setMessage({
+          type: "error",
+          text: data?.message || "Invalid email, phone number, or password.",
+        });
+        return;
+      }
+
+      setMessage({
+        type: "success",
+        text: data.message || "Login successful.",
+      });
+
+      await hydrateUserSession(data.data);
+      navigation.replace("MainTabs");
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text: `Could not reach ${API_BASE_URL}. Make sure the phone/browser can access this backend URL.`,
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -69,7 +135,7 @@ export default function LoginScreen({ navigation }) {
 
             <Text style={styles.title}>Welcome Back</Text>
             <Text style={styles.subtitle}>
-              Login to find your perfect life partner
+              Login with email or phone number to continue
             </Text>
           </LinearGradient>
 
@@ -79,15 +145,27 @@ export default function LoginScreen({ navigation }) {
               Continue your matrimony journey
             </Text>
 
-            <Text style={styles.label}>Phone Number</Text>
+            <InlineMessage type={message.type} text={message.text} />
+
+            <Text style={styles.label}>Email or Phone Number</Text>
             <View style={styles.inputBox}>
-              <Ionicons name="call-outline" size={20} color={COLORS.muted} />
+              <Ionicons
+                name="person-circle-outline"
+                size={20}
+                color={COLORS.muted}
+              />
               <TextInput
                 style={styles.input}
-                placeholder="Enter phone number"
-                keyboardType="phone-pad"
-                value={phone}
-                onChangeText={setPhone}
+                placeholder="Enter email or 10-digit phone number"
+                value={identifier}
+                onChangeText={(text) => {
+                  setIdentifier(text);
+                  if (message.text) {
+                    setMessage({ type: "info", text: "" });
+                  }
+                }}
+                autoCapitalize="none"
+                keyboardType="email-address"
                 placeholderTextColor="#9CA3AF"
               />
             </View>
@@ -104,7 +182,12 @@ export default function LoginScreen({ navigation }) {
                 placeholder="Enter password"
                 secureTextEntry={!showPassword}
                 value={password}
-                onChangeText={setPassword}
+                onChangeText={(text) => {
+                  setPassword(text);
+                  if (message.text) {
+                    setMessage({ type: "info", text: "" });
+                  }
+                }}
                 placeholderTextColor="#9CA3AF"
               />
 
@@ -123,17 +206,24 @@ export default function LoginScreen({ navigation }) {
             <TouchableOpacity
               style={styles.forgot}
               activeOpacity={0.85}
-              onPress={() =>
-                Alert.alert(
-                  "Forgot Password",
-                  "Forgot password flow will be added with backend/Firebase."
-                )
-              }
+              onPress={() => navigation.navigate("ForgotPassword")}
             >
               <Text style={styles.forgotText}>Forgot Password?</Text>
             </TouchableOpacity>
 
-            <PrimaryButton title="Login" onPress={handleLogin} />
+            <PrimaryButton
+              title={loading ? "Checking..." : "Login"}
+              onPress={handleLogin}
+              disabled={loading}
+            />
+
+            {loading && (
+              <ActivityIndicator
+                size="small"
+                color={COLORS.primary}
+                style={styles.loader}
+              />
+            )}
 
             <TouchableOpacity
               style={styles.registerRow}
@@ -171,8 +261,8 @@ export default function LoginScreen({ navigation }) {
               color={COLORS.primary}
             />
             <Text style={styles.infoText}>
-              Bride/Groom users can login here. Admin users should use separate
-              admin login.
+              Web and mobile both use the same validation now. Login accepts
+              either email or phone number.
             </Text>
           </View>
         </ScrollView>
@@ -251,6 +341,7 @@ const styles = StyleSheet.create({
     elevation: 4,
     borderWidth: 1,
     borderColor: COLORS.border,
+    gap: 10,
   },
 
   cardTitle: {
@@ -272,7 +363,7 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: COLORS.text,
     marginBottom: 8,
-    marginTop: 14,
+    marginTop: 4,
   },
 
   inputBox: {
@@ -296,7 +387,8 @@ const styles = StyleSheet.create({
 
   forgot: {
     alignSelf: "flex-end",
-    marginVertical: 14,
+    marginTop: 4,
+    marginBottom: 8,
   },
 
   forgotText: {
@@ -304,10 +396,14 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
 
+  loader: {
+    marginTop: 2,
+  },
+
   registerRow: {
     flexDirection: "row",
     justifyContent: "center",
-    marginTop: 18,
+    marginTop: 8,
   },
 
   registerText: {
@@ -324,7 +420,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginVertical: 18,
+    marginVertical: 8,
   },
 
   divider: {
