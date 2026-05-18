@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   ScrollView,
@@ -17,28 +17,58 @@ import { useMatrimony } from "../../context/MatrimonyContext";
 
 export default function AdminApprovalsScreen({ route }) {
   const selectedRequestId = route?.params?.requestId || null;
+  const [activeTab, setActiveTab] = useState("Pending");
 
   const {
     approvalRequests = [],
     approveProfile,
     rejectProfile,
     getPendingApprovalRequests,
+    getApprovedApprovalRequests,
+    getRejectedApprovalRequests,
+    loadAdminData,
   } = useMatrimony();
+
+  useEffect(() => {
+    if (typeof loadAdminData === "function") {
+      loadAdminData();
+    }
+  }, []);
 
   const pendingRequests = getPendingApprovalRequests
     ? getPendingApprovalRequests()
     : approvalRequests.filter((item) => item.status === "Pending");
 
+  const approvedRequests = getApprovedApprovalRequests
+    ? getApprovedApprovalRequests()
+    : approvalRequests.filter((item) => item.status === "Approved");
+
+  const rejectedRequests = getRejectedApprovalRequests
+    ? getRejectedApprovalRequests()
+    : approvalRequests.filter((item) => item.status === "Rejected");
+
+  const currentRequests = useMemo(() => {
+    if (activeTab === "Approved") {
+      return approvedRequests;
+    }
+
+    if (activeTab === "Rejected") {
+      return rejectedRequests;
+    }
+
+    return pendingRequests;
+  }, [activeTab, approvedRequests, rejectedRequests, pendingRequests]);
+
   const sortedRequests = selectedRequestId
-    ? [...pendingRequests].sort((a, b) => {
+    ? [...currentRequests].sort((a, b) => {
         if (a.id === selectedRequestId) return -1;
         if (b.id === selectedRequestId) return 1;
         return 0;
       })
-    : pendingRequests;
+    : currentRequests;
 
-  const handleApprove = (request) => {
-    const result = approveProfile(
+  const handleApprove = async (request) => {
+    const result = await approveProfile(
       request.id,
       "Congratulations! Mee profile admin approve chesaru."
     );
@@ -48,11 +78,12 @@ export default function AdminApprovalsScreen({ route }) {
         "Approved",
         `${request.profileName} profile approved. User ki notification vellindi.`
       );
+      setActiveTab("Approved");
     }
   };
 
-  const handleReject = (request) => {
-    const result = rejectProfile(
+  const handleReject = async (request) => {
+    const result = await rejectProfile(
       request.id,
       "Mee profile admin reject chesaru. Please details correct chesi malli submit cheyyandi."
     );
@@ -62,6 +93,7 @@ export default function AdminApprovalsScreen({ route }) {
         "Rejected",
         `${request.profileName} profile rejected. User ki notification vellindi.`
       );
+      setActiveTab("Rejected");
     }
   };
 
@@ -84,6 +116,24 @@ export default function AdminApprovalsScreen({ route }) {
       </LinearGradient>
 
       <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.tabRow}>
+          <TabButton
+            title={`Pending (${pendingRequests.length})`}
+            active={activeTab === "Pending"}
+            onPress={() => setActiveTab("Pending")}
+          />
+          <TabButton
+            title={`Approved (${approvedRequests.length})`}
+            active={activeTab === "Approved"}
+            onPress={() => setActiveTab("Approved")}
+          />
+          <TabButton
+            title={`Rejected (${rejectedRequests.length})`}
+            active={activeTab === "Rejected"}
+            onPress={() => setActiveTab("Rejected")}
+          />
+        </View>
+
         {sortedRequests.length === 0 ? (
           <View style={styles.emptyCard}>
             <Ionicons
@@ -92,16 +142,18 @@ export default function AdminApprovalsScreen({ route }) {
               color={COLORS.primary}
             />
 
-            <Text style={styles.emptyTitle}>No Pending Requests</Text>
+            <Text style={styles.emptyTitle}>No {activeTab} Requests</Text>
 
             <Text style={styles.emptyText}>
-              User profile save/submit chesthe admin approval request ikkada
-              kanipistundi.
+              {activeTab === "Pending"
+                ? "User profile save/submit chesthe admin approval request ikkada kanipistundi."
+                : `${activeTab} profiles ikkada kanipistayi.`}
             </Text>
           </View>
         ) : (
           sortedRequests.map((request) => {
             const isSelected = selectedRequestId === request.id;
+            const isPending = request.status === "Pending";
 
             return (
               <View
@@ -128,10 +180,21 @@ export default function AdminApprovalsScreen({ route }) {
                     <Text style={styles.name}>{request.profileName}</Text>
 
                     <Text style={styles.subText}>
-                      {request.gender} • {request.age || "Age N/A"}
+                      {request.gender || "N/A"} • {request.age || "Age N/A"}
                     </Text>
 
-                    <Text style={styles.statusText}>{request.status}</Text>
+                    <Text
+                      style={[
+                        styles.statusText,
+                        request.status === "Approved"
+                          ? styles.approvedStatusText
+                          : request.status === "Rejected"
+                            ? styles.rejectedStatusText
+                            : styles.pendingStatusText,
+                      ]}
+                    >
+                      {request.status}
+                    </Text>
                   </View>
                 </View>
 
@@ -160,39 +223,59 @@ export default function AdminApprovalsScreen({ route }) {
                   Submitted: {request.submittedAt || "Now"}
                 </Text>
 
-                <View style={styles.buttonRow}>
-                  <TouchableOpacity
-                    style={styles.approveBtn}
-                    activeOpacity={0.85}
-                    onPress={() => handleApprove(request)}
-                  >
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={18}
-                      color={COLORS.white}
-                    />
-                    <Text style={styles.btnText}>Approve</Text>
-                  </TouchableOpacity>
+                {!isPending && request.adminMessage ? (
+                  <Text style={styles.adminMessage}>{request.adminMessage}</Text>
+                ) : null}
 
-                  <TouchableOpacity
-                    style={styles.rejectBtn}
-                    activeOpacity={0.85}
-                    onPress={() => handleReject(request)}
-                  >
-                    <Ionicons
-                      name="close-circle"
-                      size={18}
-                      color={COLORS.white}
-                    />
-                    <Text style={styles.btnText}>Reject</Text>
-                  </TouchableOpacity>
-                </View>
+                {isPending ? (
+                  <View style={styles.buttonRow}>
+                    <TouchableOpacity
+                      style={styles.approveBtn}
+                      activeOpacity={0.85}
+                      onPress={() => handleApprove(request)}
+                    >
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={18}
+                        color={COLORS.white}
+                      />
+                      <Text style={styles.btnText}>Approve</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.rejectBtn}
+                      activeOpacity={0.85}
+                      onPress={() => handleReject(request)}
+                    >
+                      <Ionicons
+                        name="close-circle"
+                        size={18}
+                        color={COLORS.white}
+                      />
+                      <Text style={styles.btnText}>Reject</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
               </View>
             );
           })
         )}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function TabButton({ title, active, onPress }) {
+  return (
+    <TouchableOpacity
+      style={[styles.tabButton, active && styles.activeTabButton]}
+      activeOpacity={0.85}
+      onPress={onPress}
+    >
+      <Text style={[styles.tabButtonText, active && styles.activeTabButtonText]}>
+        {title}
+      </Text>
+    </TouchableOpacity>
   );
 }
 
@@ -248,6 +331,37 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 120,
+  },
+
+  tabRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 14,
+  },
+
+  tabButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 14,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+
+  activeTabButton: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+
+  tabButtonText: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+
+  activeTabButtonText: {
+    color: COLORS.white,
   },
 
   emptyCard: {
@@ -334,14 +448,27 @@ const styles = StyleSheet.create({
 
   statusText: {
     alignSelf: "flex-start",
-    color: COLORS.warning || "#F59E0B",
-    backgroundColor: "#FFF7DD",
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
     fontSize: 12,
     fontWeight: "900",
     marginTop: 7,
+  },
+
+  pendingStatusText: {
+    color: COLORS.warning || "#F59E0B",
+    backgroundColor: "#FFF7DD",
+  },
+
+  approvedStatusText: {
+    color: COLORS.success || "#16A34A",
+    backgroundColor: "#ECFDF5",
+  },
+
+  rejectedStatusText: {
+    color: COLORS.danger || "#DC2626",
+    backgroundColor: "#FEF2F2",
   },
 
   infoBox: {
@@ -377,6 +504,13 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     fontSize: 12,
     marginTop: 10,
+  },
+
+  adminMessage: {
+    marginTop: 8,
+    color: COLORS.muted,
+    fontWeight: "700",
+    lineHeight: 19,
   },
 
   buttonRow: {
